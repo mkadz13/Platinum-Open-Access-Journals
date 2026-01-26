@@ -58,6 +58,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add data/doaj.csv docs/index.html
+          git add data/doaj.csv data/doaj_diamond_active.csv data/doaj_issns.txt docs/index.html
           git commit -m "Update DOAJ + rebuild site" || echo "No changes to commit"
           git push
