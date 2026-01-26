@@ -48,7 +48,7 @@ jobs:
 
       - name: Build docs/index.md
         run: |
-          python scripts/build_list.py \
+          python scripts/JifMatch.py \
             --doaj data/doaj.csv \
             --jif "${{ steps.pickjif.outputs.jif_path }}" \
             --label "${{ steps.pickjif.outputs.year }}" \
