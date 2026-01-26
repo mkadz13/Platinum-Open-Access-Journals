@@ -54,7 +54,7 @@ def reduce_doaj(
     Loads DOAJ CSV and filters to:
       - DOAJ OA-compliant = Yes
       - APC = No
-      - Journal is active = Yes
+      - NOT continued/ceased (no 'Continues' and no 'Continued By')
 
     Writes:
       - reduced_out_csv: reduced journal-level DOAJ table (inspectable)
@@ -63,34 +63,48 @@ def reduce_doaj(
     """
     df = pd.read_csv(doaj_csv, low_memory=False)
 
-    oa_col = _find_col(
-        df,
-        "Does the journal comply to DOAJ's definition of open access?",
-        "does the journal comply to doaj's definition of open access?",
-    )
-    apc_col = _find_col(df, "APC", "apc")
-    active_col = _find_col(df, "Journal is active", "journal is active")
+    # Required columns in YOUR export
+    oa_col = _find_col(df, "Does the journal comply to DOAJ's definition of open access?")
+    apc_col = _find_col(df, "APC")
+    continues_col = _find_col(df, "Continues")
+    continued_by_col = _find_col(df, "Continued By")
 
     if oa_col is None:
         raise KeyError("DOAJ CSV missing OA compliance column.")
     if apc_col is None:
         raise KeyError("DOAJ CSV missing APC column.")
-    if active_col is None:
-        raise KeyError("DOAJ CSV missing 'Journal is active' column.")
+    # These two should exist in your header; if not, we can fall back to no filtering.
+    if continues_col is None:
+        raise KeyError("DOAJ CSV missing 'Continues' column.")
+    if continued_by_col is None:
+        raise KeyError("DOAJ CSV missing 'Continued By' column.")
 
+    # Normalize Yes/No and empties
     df["_oa"] = df[oa_col].map(_norm_yesno)
     df["_apc"] = df[apc_col].map(_norm_yesno)
-    df["_active"] = df[active_col].map(_norm_yesno)
+
+    # Consider journal "active/current title" if it is NOT continued/continued-by
+    def is_blank(x) -> bool:
+        if pd.isna(x):
+            return True
+        return str(x).strip() == ""
+
+    df["_continues_blank"] = df[continues_col].map(is_blank)
+    df["_continued_by_blank"] = df[continued_by_col].map(is_blank)
 
     reduced = df[
         (df["_oa"] == "yes")
         & (df["_apc"] == "no")
-        & (df["_active"] == "yes")
+        & (df["_continues_blank"])
+        & (df["_continued_by_blank"])
     ].copy()
 
-    reduced.drop(columns=["_oa", "_apc", "_active"], inplace=True)
+    reduced.drop(
+        columns=["_oa", "_apc", "_continues_blank", "_continued_by_blank"],
+        inplace=True,
+    )
 
-    # Keep useful columns (only those that actually exist)
+    # Keep useful columns (only those that exist)
     keep = [
         "Journal title",
         "Journal ISSN (print version)",
@@ -98,9 +112,17 @@ def reduce_doaj(
         "Journal URL",
         "URL in DOAJ",
         "Publisher",
+        "Country of publisher",
         "APC",
-        "Journal is active",
+        "APC amount",
         "Does the journal comply to DOAJ's definition of open access?",
+        "Continues",
+        "Continued By",
+        "Subjects",
+        "Added on Date",
+        "Last updated Date",
+        "Number of Article Records",
+        "Most Recent Article Added",
     ]
     keep_existing = [c for c in keep if c in reduced.columns]
     reduced_out_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -262,7 +284,7 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
 </head>
 <body>
   <h1>Platinum (diamond) OA journals with Impact Factors — {year_label}</h1>
-  <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No, Journal is active = Yes; matched to the provided JIF list.</div>
+    <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No, and not continued/continued-by; matched to the provided JIF list.</div>
   {table_html}
 </body>
 </html>
