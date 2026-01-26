@@ -129,36 +129,49 @@ def match(jif: pd.DataFrame, doaj_issn: pd.DataFrame, doaj_titles: pd.DataFrame)
     return combined
 
 
-def to_markdown(df: pd.DataFrame, year_label: str) -> str:
-    lines = []
-    lines.append(f"# Platinum (diamond) OA journals with Impact Factors — {year_label}")
-    lines.append("")
-    lines.append(
-        "Criteria: DOAJ-compliant Open Access = Yes, APC = No; matched to the provided JIF list."
-    )
-    lines.append("")
-    lines.append("")
+def to_html(df: pd.DataFrame, year_label: str) -> str:
+    df = df.copy()
 
-    lines.append("| Journal | Impact Factor | Links |")
-    lines.append("|---|---:|---|")
-
-    for _, r in df.iterrows():
-        j = str(r["Journal"])
-        jif = r["Impact Factor"]
-        jif_str = f"{jif:.3f}" if pd.notna(jif) else ""
-        journal_url = str(r.get("Journal URL") or "").strip()
-        doaj_url = str(r.get("DOAJ URL") or "").strip()
-
+    def link_cell(row):
         links = []
-        if journal_url:
-            links.append(f"[Journal site]({journal_url})")
-        if doaj_url:
-            links.append(f"[DOAJ]({doaj_url})")
+        if row.get("Journal URL"):
+            links.append(f'<a href="{row["Journal URL"]}">Journal site</a>')
+        if row.get("DOAJ URL"):
+            links.append(f'<a href="{row["DOAJ URL"]}">DOAJ</a>')
+        return " · ".join(links)
 
-        lines.append(f"| {j} | {jif_str} | {' · '.join(links)} |")
+    df["Links"] = df.apply(link_cell, axis=1)
+    df = df[["Journal", "Impact Factor", "Links"]]
 
-    lines.append("")
-    return "\n".join(lines)
+    # Format impact factor
+    df["Impact Factor"] = df["Impact Factor"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+
+    table_html = df.to_html(index=False, escape=False)
+
+    return f"""<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Platinum OA Journals — {year_label}</title>
+  <style>
+    body {{ font-family: system-ui, Arial, sans-serif; margin: 2rem; }}
+    h1 {{ margin-bottom: 0.5rem; }}
+    .meta {{ color: #555; margin-bottom: 1rem; }}
+    table {{ border-collapse: collapse; width: 100%; }}
+    th, td {{ border: 1px solid #ddd; padding: 8px; vertical-align: top; }}
+    th {{ background: #f5f5f5; text-align: left; }}
+    td:nth-child(2), th:nth-child(2) {{ text-align: right; white-space: nowrap; }}
+  </style>
+</head>
+<body>
+  <h1>Platinum (diamond) OA journals with Impact Factors — {year_label}</h1>
+  <div class="meta">Criteria: DOAJ-compliant Open Access = Yes, APC = No; matched to the provided JIF list.</div>
+  {table_html}
+</body>
+</html>
+"""
+
 
 
 def main():
