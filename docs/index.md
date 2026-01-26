@@ -2,6 +2,7 @@
 
 Criteria: DOAJ-compliant Open Access = Yes, APC = No; matched to the provided JIF list.
 
+
 | Journal | Impact Factor | Links |
 |---|---:|---|
 | Living Reviews in Relativity | 40.429 | [Journal site](http://www.springer.com/physics/theoretical%2C+mathematical+%26+computational+physics/journal/41114) · [DOAJ](https://doaj.org/toc/00fce6dc4ee4432797df1fcb8f24b6f4) |
