@@ -26,44 +26,146 @@ def norm_issn(x):
     return f"{m.group(1)}-{m.group(2)}"
 
 
-def load_doaj(doaj_csv: Path) -> pd.DataFrame:
-    doaj = pd.read_csv(doaj_csv, low_memory=False)
+def _colmap(df: pd.DataFrame) -> dict:
+    return {c.lower().strip(): c for c in df.columns}
 
-    # Filter to platinum/diamond OA per your spec
-    doaj = doaj[
-        (doaj["Does the journal comply to DOAJ's definition of open access?"] == "Yes")
-        & (doaj["APC"] == "No")
+
+def _find_col(df: pd.DataFrame, *candidates: str) -> str | None:
+    cm = _colmap(df)
+    for cand in candidates:
+        key = cand.lower().strip()
+        if key in cm:
+            return cm[key]
+    return None
+
+
+def _norm_yesno(x) -> str:
+    if pd.isna(x):
+        return ""
+    return str(x).strip().casefold()
+
+
+def reduce_doaj(
+    doaj_csv: Path,
+    reduced_out_csv: Path,
+    issn_out_txt: Path,
+) -> pd.DataFrame:
+    """
+    Loads DOAJ CSV and filters to:
+      - DOAJ OA-compliant = Yes
+      - APC = No
+      - Journal is active = Yes
+
+    Writes:
+      - reduced_out_csv: reduced journal-level DOAJ table (inspectable)
+      - issn_out_txt: de-duped ISSN list (one per line) from print + online ISSNs
+    Returns reduced DataFrame.
+    """
+    df = pd.read_csv(doaj_csv, low_memory=False)
+
+    oa_col = _find_col(
+        df,
+        "Does the journal comply to DOAJ's definition of open access?",
+        "does the journal comply to doaj's definition of open access?",
+    )
+    apc_col = _find_col(df, "APC", "apc")
+    active_col = _find_col(df, "Journal is active", "journal is active")
+
+    if oa_col is None:
+        raise KeyError("DOAJ CSV missing OA compliance column.")
+    if apc_col is None:
+        raise KeyError("DOAJ CSV missing APC column.")
+    if active_col is None:
+        raise KeyError("DOAJ CSV missing 'Journal is active' column.")
+
+    df["_oa"] = df[oa_col].map(_norm_yesno)
+    df["_apc"] = df[apc_col].map(_norm_yesno)
+    df["_active"] = df[active_col].map(_norm_yesno)
+
+    reduced = df[
+        (df["_oa"] == "yes")
+        & (df["_apc"] == "no")
+        & (df["_active"] == "yes")
     ].copy()
 
+    reduced.drop(columns=["_oa", "_apc", "_active"], inplace=True)
+
+    # Keep useful columns (only those that actually exist)
+    keep = [
+        "Journal title",
+        "Journal ISSN (print version)",
+        "Journal EISSN (online version)",
+        "Journal URL",
+        "URL in DOAJ",
+        "Publisher",
+        "APC",
+        "Journal is active",
+        "Does the journal comply to DOAJ's definition of open access?",
+    ]
+    keep_existing = [c for c in keep if c in reduced.columns]
+    reduced_out_csv.parent.mkdir(parents=True, exist_ok=True)
+    reduced[keep_existing].to_csv(reduced_out_csv, index=False)
+
+    # Build ISSN list
+    issns = set()
+    if "Journal ISSN (print version)" in reduced.columns:
+        for v in reduced["Journal ISSN (print version)"]:
+            n = norm_issn(v)
+            if n:
+                issns.add(n)
+    if "Journal EISSN (online version)" in reduced.columns:
+        for v in reduced["Journal EISSN (online version)"]:
+            n = norm_issn(v)
+            if n:
+                issns.add(n)
+
+    issn_out_txt.parent.mkdir(parents=True, exist_ok=True)
+    issn_out_txt.write_text("\n".join(sorted(issns)) + "\n", encoding="utf-8")
+
+    print(f"Reduced DOAJ saved: {reduced_out_csv} ({len(reduced)} journals)")
+    print(f"ISSN list saved:   {issn_out_txt} ({len(issns)} ISSNs)")
+
+    return reduced
+
+
+def load_doaj(reduced_doaj_csv: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Loads the already-reduced DOAJ CSV and prepares:
+      - doaj_issn: one row per ISSN, with title + URLs
+      - doaj_titles: one row per normalized title, with URLs
+    """
+    doaj = pd.read_csv(reduced_doaj_csv, low_memory=False)
+
     doaj["title_norm"] = doaj["Journal title"].map(norm_title)
-    doaj["issn_print"] = doaj["Journal ISSN (print version)"].map(norm_issn)
-    doaj["issn_e"] = doaj["Journal EISSN (online version)"].map(norm_issn)
+    doaj["issn_print"] = doaj.get("Journal ISSN (print version)", pd.Series([None] * len(doaj))).map(norm_issn)
+    doaj["issn_e"] = doaj.get("Journal EISSN (online version)", pd.Series([None] * len(doaj))).map(norm_issn)
 
     # Build an ISSN lookup table (one row per ISSN)
     issn_rows = []
     for _, r in doaj.iterrows():
-        for issn in (r["issn_print"], r["issn_e"]):
+        for issn in (r.get("issn_print"), r.get("issn_e")):
             if issn:
                 issn_rows.append(
                     {
                         "issn": issn,
-                        "Journal title": r["Journal title"],
+                        "Journal title": r.get("Journal title", ""),
                         "Journal URL": r.get("Journal URL", ""),
                         "DOAJ URL": r.get("URL in DOAJ", ""),
                     }
                 )
     doaj_issn = pd.DataFrame(issn_rows).drop_duplicates("issn")
 
-    doaj_titles = doaj[["title_norm", "Journal title", "Journal URL", "URL in DOAJ"]].drop_duplicates(
-        "title_norm"
-    ).rename(columns={"URL in DOAJ": "DOAJ URL"})
+    doaj_titles = (
+        doaj[["title_norm", "Journal title", "Journal URL", "URL in DOAJ"]]
+        .drop_duplicates("title_norm")
+        .rename(columns={"URL in DOAJ": "DOAJ URL"})
+    )
 
     return doaj_issn, doaj_titles
 
 
 def load_jif(jif_csv: Path) -> pd.DataFrame:
     jif = pd.read_csv(jif_csv)
-    # Normalize expected columns across your two formats
     cols = {c.lower(): c for c in jif.columns}
 
     if "name" not in cols:
@@ -72,7 +174,7 @@ def load_jif(jif_csv: Path) -> pd.DataFrame:
     name_col = cols["name"]
     score_col = cols.get("score") or cols.get("impact factor") or cols.get("jif")
     if score_col is None:
-        raise ValueError(f"{jif_csv} missing an impact factor column (expected 'score').")
+        raise ValueError(f"{jif_csv} missing an impact factor column (expected 'score' or 'impact factor' or 'jif').")
 
     out = pd.DataFrame(
         {
@@ -81,17 +183,14 @@ def load_jif(jif_csv: Path) -> pd.DataFrame:
         }
     )
 
-    # Optional ISSN in 2020 file
+    # Optional ISSN in some files
     if "issn" in cols:
         out["issn_norm"] = jif[cols["issn"]].map(norm_issn)
     else:
         out["issn_norm"] = None
 
     out["title_norm"] = out["Journal"].map(norm_title)
-
-    # Make Impact Factor numeric where possible; keep non-numeric as NaN
     out["Impact Factor"] = pd.to_numeric(out["Impact Factor"], errors="coerce")
-
     return out
 
 
@@ -101,17 +200,16 @@ def match(jif: pd.DataFrame, doaj_issn: pd.DataFrame, doaj_titles: pd.DataFrame)
         doaj_issn, left_on="issn_norm", right_on="issn", how="inner"
     )
 
-    # 2) Title match for everything else (or if ISSN missing)
+    # 2) Title match for everything else
     m_title = jif.merge(doaj_titles, on="title_norm", how="inner")
 
-    # Combine, prefer ISSN result if duplicated
     keep_cols = ["Journal", "Impact Factor", "Journal URL", "DOAJ URL"]
-    a = m_issn.rename(columns={"name": "Journal"})  # harmless if not present
+
+    a = m_issn.copy()
     a["Journal URL"] = a.get("Journal URL", "")
     a["DOAJ URL"] = a.get("DOAJ URL", "")
-    a = a.rename(columns={"Journal": "Journal"})  # no-op
 
-    b = m_title.rename(columns={"Journal": "Journal"})
+    b = m_title.copy()
     b["Journal URL"] = b.get("Journal URL", "")
     b["DOAJ URL"] = b.get("DOAJ URL", "")
 
@@ -143,9 +241,7 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     df["Links"] = df.apply(link_cell, axis=1)
     df = df[["Journal", "Impact Factor", "Links"]]
 
-    # Format impact factor
     df["Impact Factor"] = df["Impact Factor"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
-
     table_html = df.to_html(index=False, escape=False)
 
     return f"""<!doctype html>
@@ -166,23 +262,33 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
 </head>
 <body>
   <h1>Platinum (diamond) OA journals with Impact Factors — {year_label}</h1>
-  <div class="meta">Criteria: DOAJ-compliant Open Access = Yes, APC = No; matched to the provided JIF list.</div>
+  <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No, Journal is active = Yes; matched to the provided JIF list.</div>
   {table_html}
 </body>
 </html>
 """
 
 
-
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--doaj", required=True, help="Path to journalcsv2.csv")
-    p.add_argument("--jif", required=True, help="Path to a JIF CSV (e.g., JIF2021.csv)")
-    p.add_argument("--label", required=True, help="Label for the output page (e.g., 2021)")
-    p.add_argument("--out", default="docs/index.md", help="Output markdown path")
+    p.add_argument("--doaj", required=True, help="Path to DOAJ CSV (downloaded from https://doaj.org/csv)")
+    p.add_argument("--jif", required=True, help="Path to a JIF CSV (e.g., JIF2024.csv)")
+    p.add_argument("--label", required=True, help="Label for the output page (e.g., 2024)")
+    p.add_argument("--out", default="docs/index.html", help="Output HTML path")
+
+    # New outputs so you can *see* the reduced DOAJ + ISSNs
+    p.add_argument("--reduced-doaj-out", default="data/doaj_diamond_active.csv",
+                   help="Where to write the reduced DOAJ CSV")
+    p.add_argument("--issn-out", default="data/doaj_issns.txt",
+                   help="Where to write the ISSN list (one per line)")
     args = p.parse_args()
 
-    doaj_issn, doaj_titles = load_doaj(Path(args.doaj))
+    # 1) Reduce DOAJ (creates files you can inspect)
+    reduced_path = Path(args.reduced_doaj_out)
+    reduce_doaj(Path(args.doaj), reduced_path, Path(args.issn_out))
+
+    # 2) Use reduced DOAJ to match to JIF list and build site
+    doaj_issn, doaj_titles = load_doaj(reduced_path)
     jif = load_jif(Path(args.jif))
     matched = match(jif, doaj_issn, doaj_titles)
 
