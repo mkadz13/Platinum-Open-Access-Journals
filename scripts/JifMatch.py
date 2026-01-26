@@ -186,10 +186,10 @@ def main():
     jif = load_jif(Path(args.jif))
     matched = match(jif, doaj_issn, doaj_titles)
 
-    out_md = to_markdown(matched, args.label)
+    out_html = to_html(matched, args.label)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(out_md, encoding="utf-8")
+    out_path.write_text(out_html, encoding="utf-8")
     print(f"Wrote {out_path} with {len(matched)} journals")
 
 
