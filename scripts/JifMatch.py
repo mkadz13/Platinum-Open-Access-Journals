@@ -137,6 +137,7 @@ def to_markdown(df: pd.DataFrame, year_label: str) -> str:
         "Criteria: DOAJ-compliant Open Access = Yes, APC = No; matched to the provided JIF list."
     )
     lines.append("")
+    lines.append("")
 
     lines.append("| Journal | Impact Factor | Links |")
     lines.append("|---|---:|---|")
