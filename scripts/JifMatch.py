@@ -25,6 +25,24 @@ def norm_issn(x):
         return None
     return f"{m.group(1)}-{m.group(2)}"
 
+def write_chunked_issns(issns, out_path: Path, chunk_size: int = 600) -> None:
+    issns = [x for x in issns if x]
+    issns = sorted(set(issns))
+
+    lines = []
+    total = len(issns)
+    seg = 1
+    for start in range(0, total, chunk_size):
+        end = min(start + chunk_size, total)
+        lines.append(f"### SEGMENT {seg} ({start+1}-{end} of {total})")
+        lines.append(", ".join(issns[start:end]))
+        lines.append("") 
+        seg += 1
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text("\n".join(lines), encoding="utf-8")
+
+
 
 def _colmap(df: pd.DataFrame) -> dict:
     return {c.lower().strip(): c for c in df.columns}
@@ -50,17 +68,6 @@ def reduce_doaj(
     reduced_out_csv: Path,
     issn_out_txt: Path,
 ) -> pd.DataFrame:
-    """
-    Loads DOAJ CSV and filters to:
-      - DOAJ OA-compliant = Yes
-      - APC = No
-      - NOT continued/ceased (no 'Continues' and no 'Continued By')
-
-    Writes:
-      - reduced_out_csv: reduced journal-level DOAJ table (inspectable)
-      - issn_out_txt: de-duped ISSN list (one per line) from print + online ISSNs
-    Returns reduced DataFrame.
-    """
     df = pd.read_csv(doaj_csv, low_memory=False)
 
     # Required columns in YOUR export
@@ -129,23 +136,24 @@ def reduce_doaj(
     reduced[keep_existing].to_csv(reduced_out_csv, index=False)
 
     # Build ISSN list
-    issns = set()
-    if "Journal ISSN (print version)" in reduced.columns:
-        for v in reduced["Journal ISSN (print version)"]:
-            n = norm_issn(v)
-            if n:
-                issns.add(n)
-    if "Journal EISSN (online version)" in reduced.columns:
-        for v in reduced["Journal EISSN (online version)"]:
-            n = norm_issn(v)
-            if n:
-                issns.add(n)
+    issns = []
 
-    issn_out_txt.parent.mkdir(parents=True, exist_ok=True)
-    issn_out_txt.write_text("\n".join(sorted(issns)) + "\n", encoding="utf-8")
+    for _, r in reduced.iterrows():
+        e = norm_issn(r.get("Journal EISSN (online version)"))
+        p = norm_issn(r.get("Journal ISSN (print version)"))
+    
+        if e:
+            issns.append(e)
+        elif p:
+            issns.append(p)
+    
+    issns = sorted(set(issns))
 
+    write_chunked_issns(issns, issn_out_txt, chunk_size=600)
+    
     print(f"Reduced DOAJ saved: {reduced_out_csv} ({len(reduced)} journals)")
-    print(f"ISSN list saved:   {issn_out_txt} ({len(issns)} ISSNs)")
+    print(f"ISSN list saved:   {issn_out_txt} ({len(issns)} ISSNs, chunked 600/segment)")
+
 
     return reduced
 
