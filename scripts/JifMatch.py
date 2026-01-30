@@ -279,7 +279,7 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Platinum OA Journals — {year_label}</title>
+  <title>Platinum OA Journals - {year_label}</title>
   <style>
     body {{ font-family: system-ui, Arial, sans-serif; margin: 2rem; }}
     h1 {{ margin-bottom: 0.5rem; }}
@@ -291,8 +291,8 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
   </style>
 </head>
 <body>
-  <h1>Platinum (diamond) OA journals with Impact Factors — {year_label}</h1>
-    <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No, and not continued/continued-by; matched to the provided JIF list.</div>
+  <h1>Platinum OA journals with Impact Factors - {year_label}</h1>
+    <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No.</div>
   {table_html}
 </body>
 </html>
