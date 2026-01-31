@@ -1,10 +1,7 @@
-#!/usr/bin/env python3
 import re
 import argparse
 from pathlib import Path
-
 import pandas as pd
-
 
 def norm_title(s: str) -> str:
     if pd.isna(s):
@@ -42,11 +39,8 @@ def write_chunked_issns(issns, out_path: Path, chunk_size: int = 600) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(lines), encoding="utf-8")
 
-
-
 def _colmap(df: pd.DataFrame) -> dict:
     return {c.lower().strip(): c for c in df.columns}
-
 
 def _find_col(df: pd.DataFrame, *candidates: str) -> str | None:
     cm = _colmap(df)
@@ -56,12 +50,10 @@ def _find_col(df: pd.DataFrame, *candidates: str) -> str | None:
             return cm[key]
     return None
 
-
 def _norm_yesno(x) -> str:
     if pd.isna(x):
         return ""
     return str(x).strip().casefold()
-
 
 def reduce_doaj(
     doaj_csv: Path,
@@ -70,7 +62,6 @@ def reduce_doaj(
 ) -> pd.DataFrame:
     df = pd.read_csv(doaj_csv, low_memory=False)
 
-    # Required columns in YOUR export
     oa_col = _find_col(df, "Does the journal comply to DOAJ's definition of open access?")
     apc_col = _find_col(df, "APC")
     continues_col = _find_col(df, "Continues")
@@ -80,17 +71,14 @@ def reduce_doaj(
         raise KeyError("DOAJ CSV missing OA compliance column.")
     if apc_col is None:
         raise KeyError("DOAJ CSV missing APC column.")
-    # These two should exist in your header; if not, we can fall back to no filtering.
     if continues_col is None:
         raise KeyError("DOAJ CSV missing 'Continues' column.")
     if continued_by_col is None:
         raise KeyError("DOAJ CSV missing 'Continued By' column.")
 
-    # Normalize Yes/No and empties
     df["_oa"] = df[oa_col].map(_norm_yesno)
     df["_apc"] = df[apc_col].map(_norm_yesno)
 
-    # Consider journal "active/current title" if it is NOT continued/continued-by
     def is_blank(x) -> bool:
         if pd.isna(x):
             return True
@@ -111,7 +99,6 @@ def reduce_doaj(
         inplace=True,
     )
 
-    # Keep useful columns (only those that exist)
     keep = [
         "Journal title",
         "Journal ISSN (print version)",
@@ -135,7 +122,6 @@ def reduce_doaj(
     reduced_out_csv.parent.mkdir(parents=True, exist_ok=True)
     reduced[keep_existing].to_csv(reduced_out_csv, index=False)
 
-    # Build ISSN list
     issns = []
 
     for _, r in reduced.iterrows():
@@ -159,18 +145,12 @@ def reduce_doaj(
 
 
 def load_doaj(reduced_doaj_csv: Path) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Loads the already-reduced DOAJ CSV and prepares:
-      - doaj_issn: one row per ISSN, with title + URLs
-      - doaj_titles: one row per normalized title, with URLs
-    """
     doaj = pd.read_csv(reduced_doaj_csv, low_memory=False)
 
     doaj["title_norm"] = doaj["Journal title"].map(norm_title)
     doaj["issn_print"] = doaj.get("Journal ISSN (print version)", pd.Series([None] * len(doaj))).map(norm_issn)
     doaj["issn_e"] = doaj.get("Journal EISSN (online version)", pd.Series([None] * len(doaj))).map(norm_issn)
 
-    # Build an ISSN lookup table (one row per ISSN)
     issn_rows = []
     for _, r in doaj.iterrows():
         for issn in (r.get("issn_print"), r.get("issn_e")):
@@ -213,7 +193,6 @@ def load_jif(jif_csv: Path) -> pd.DataFrame:
         }
     )
 
-    # Optional ISSN in some files
     if "issn" in cols:
         out["issn_norm"] = jif[cols["issn"]].map(norm_issn)
     else:
@@ -225,14 +204,11 @@ def load_jif(jif_csv: Path) -> pd.DataFrame:
 
 
 def match(jif: pd.DataFrame, doaj_issn: pd.DataFrame, doaj_titles: pd.DataFrame) -> pd.DataFrame:
-    # 1) ISSN match (best)
     m_issn = jif.dropna(subset=["issn_norm"]).merge(
         doaj_issn, left_on="issn_norm", right_on="issn", how="inner"
     )
 
-    # 2) Title match for everything else
     m_title = jif.merge(doaj_titles, on="title_norm", how="inner")
-
     keep_cols = ["Journal", "Impact Factor", "Journal URL", "DOAJ URL"]
 
     a = m_issn.copy()
@@ -330,7 +306,6 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     <input id="minIF" type="number" step="0.001" placeholder="Min IF" />
     <input id="maxIF" type="number" step="0.001" placeholder="Max IF" />
     <button id="clearBtn" type="button">Clear</button>
-    <div class="hint">Tip: filtering is debounced for speed on large tables.</div>
   </div>
 
   {table_html}
@@ -350,7 +325,6 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
       const ifText = (row.cells[1].innerText || "").replace(/,/g, "").trim();
       let ifVal = Number(ifText);
       if (!Number.isFinite(ifVal)) {{
-        // handle "<0.1" just in case, though you format to 3dp
         if (ifText.startsWith("<")) {{
           const t = Number(ifText.slice(1).trim());
           ifVal = Number.isFinite(t) ? t : NaN;
@@ -366,7 +340,6 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
       const min = minIF.value === "" ? -Infinity : Number(minIF.value);
       const max = maxIF.value === "" ? Infinity : Number(maxIF.value);
 
-      // One pass over cached array (no DOM reads)
       for (const item of cached) {{
         const nameOK = query === "" || item.name.includes(query);
         const ifOK = Number.isFinite(item.ifVal) && item.ifVal >= min && item.ifVal <= max;
@@ -391,7 +364,6 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
       applyFiltersNow();
     }});
 
-    // initial
     applyFiltersNow();
   }})();
   </script>
@@ -409,18 +381,15 @@ def main():
     p.add_argument("--label", required=True, help="Label for the output page (e.g., 2024)")
     p.add_argument("--out", default="docs/index.html", help="Output HTML path")
 
-    # New outputs so you can *see* the reduced DOAJ + ISSNs
     p.add_argument("--reduced-doaj-out", default="data/doaj_diamond_active.csv",
                    help="Where to write the reduced DOAJ CSV")
     p.add_argument("--issn-out", default="data/doaj_issns.txt",
                    help="Where to write the ISSN list (one per line)")
     args = p.parse_args()
 
-    # 1) Reduce DOAJ (creates files you can inspect)
     reduced_path = Path(args.reduced_doaj_out)
     reduce_doaj(Path(args.doaj), reduced_path, Path(args.issn_out))
 
-    # 2) Use reduced DOAJ to match to JIF list and build site
     doaj_issn, doaj_titles = load_doaj(reduced_path)
     jif = load_jif(Path(args.jif))
     matched = match(jif, doaj_issn, doaj_titles)
