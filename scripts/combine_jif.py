@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import re
 import glob
 from io import StringIO
@@ -39,31 +38,42 @@ def find_col(cols, options):
 def clean_jcr_csv_text(raw: str) -> str:
     out_lines = []
     for line in raw.splitlines():
-        # Fix: "97.18"%,
-        line = re.sub(r'"([0-9]+(?:\.[0-9]+)?)"%\s*,\s*$', r'"\1%"', line)
-        # Fix: "0"%,
-        line = re.sub(r'"([0-9]+)"%\s*,\s*$', r'"\1%"', line)
-        # Fix: ..."%" ,  (general)
-        line = re.sub(r'("%)\s*,\s*$', r"\1", line)
+        line = re.sub(
+            r'"([0-9]+(?:\.[0-9]+)?)"%\s*,',   
+            r'"\1%",',                        
+            line
+        )
+
+        line = re.sub(
+            r'"([0-9]+(?:\.[0-9]+)?)"%\s*$',
+            r'"\1%"',
+            line
+        )
+
+        line = re.sub(r",\s*$", "", line)
+
         out_lines.append(line)
+
     return "\n".join(out_lines) + "\n"
+
 
 
 def read_jcr_csv_robust(path: str) -> pd.DataFrame:
     raw = Path(path).read_text(encoding="utf-8", errors="replace")
 
-    # Remove the leading metadata line if present (the line starting with "Journal Data Filtered By:")
     lines = raw.splitlines()
     if lines and lines[0].strip().startswith('"Journal Data Filtered By:'):
         raw = "\n".join(lines[1:]) + "\n"
 
     raw = clean_jcr_csv_text(raw)
-    return pd.read_csv(StringIO(raw), low_memory=False)
+
+    return pd.read_csv(StringIO(raw), engine="python")
+
 
 
 def main():
-    # Change this folder + year
-    year = 2023
+    # Change year to the specific year you are getting JIF csvs from
+    year = 2024
     files = glob.glob(f"data/raw_jcr_{year}/*.csv")
     if not files:
         raise SystemExit("No CSVs found. Put them in data/raw_jcr_YYYY/")
@@ -78,7 +88,6 @@ def main():
             bad.append((f, f"read failed: {e}"))
             continue
 
-        # Match your JCR headers
         name_col = find_col(df.columns, ["Journal name", "journal name", "name", "journal", "journal title"])
         score_col = find_col(df.columns, [f"{year} JIF", f"{year} jif", "jif", "impact factor", "score"])
         issn_col = find_col(df.columns, ["ISSN", "issn"])
@@ -89,8 +98,9 @@ def main():
             continue
 
         jif_raw = df[score_col].astype(str).str.strip()
-        # Convert special values
-        jif_raw = jif_raw.replace({"N/A": "", "nan": "", "<0.1": "0.05"})
+        jif_raw = jif_raw.str.replace("<", "", regex=False).str.strip()
+        jif_raw = jif_raw.replace({"N/A": "", "nan": ""})
+
         score = pd.to_numeric(jif_raw, errors="coerce")
 
         out = pd.DataFrame(
@@ -100,7 +110,6 @@ def main():
             }
         )
 
-        # Prefer eISSN, fallback to ISSN (fewer identifiers / better match)
         eissn = df[eissn_col].map(norm_issn) if eissn_col else None
         pissn = df[issn_col].map(norm_issn) if issn_col else None
 
@@ -123,15 +132,10 @@ def main():
         raise SystemExit(1)
 
     all_df = pd.concat(frames, ignore_index=True)
-
-    # Deduplicate: prefer ISSN if present, else title_norm
     all_df["key"] = all_df["issn"].fillna(all_df["title_norm"])
 
-    # Keep highest score per key
     all_df = all_df.sort_values(["key", "score"], ascending=[True, False])
     all_df = all_df.drop_duplicates("key", keep="first")
-
-    # Output in your expected format for matcher script
     all_df = all_df[["name", "score", "issn"]].sort_values("score", ascending=False)
 
     out_path = f"data/JIF{year}.csv"
