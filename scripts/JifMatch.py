@@ -271,8 +271,15 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     df["Links"] = df.apply(link_cell, axis=1)
     df = df[["Journal", "Impact Factor", "Links"]]
 
+    # Format Impact Factor consistently for display
     df["Impact Factor"] = df["Impact Factor"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
+
     table_html = df.to_html(index=False, escape=False)
+    # Add an id so JS can find the table
+    table_html = table_html.replace(
+        '<table border="1" class="dataframe">',
+        '<table id="jifTable" border="1" class="dataframe">'
+    )
 
     return f"""<!doctype html>
 <html>
@@ -284,6 +291,32 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     body {{ font-family: system-ui, Arial, sans-serif; margin: 2rem; }}
     h1 {{ margin-bottom: 0.5rem; }}
     .meta {{ color: #555; margin-bottom: 1rem; }}
+
+    .controls {{
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin: 1rem 0;
+      align-items: center;
+    }}
+    .controls input {{
+      padding: 8px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+    }}
+    .controls button {{
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      background: #f5f5f5;
+      cursor: pointer;
+    }}
+    .controls .hint {{
+      width: 100%;
+      color: #666;
+      font-size: 0.9rem;
+    }}
+
     table {{ border-collapse: collapse; width: 100%; }}
     th, td {{ border: 1px solid #ddd; padding: 8px; vertical-align: top; }}
     th {{ background: #f5f5f5; text-align: left; }}
@@ -292,11 +325,74 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
 </head>
 <body>
   <h1>Platinum OA journals with Impact Factors - {year_label}</h1>
-    <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No.</div>
+  <div class="meta">Criteria: DOAJ OA-compliant = Yes, APC = No.</div>
+
+  <div class="controls">
+    <input id="q" type="text" placeholder="Search journal name..." />
+    <input id="minIF" type="number" step="0.001" placeholder="Min IF" />
+    <input id="maxIF" type="number" step="0.001" placeholder="Max IF" />
+    <button id="clearBtn" type="button">Clear</button>
+    <div class="hint">Tip: use Min/Max to filter by impact factor range.</div>
+  </div>
+
   {table_html}
+
+  <script>
+  (function () {{
+    const q = document.getElementById("q");
+    const minIF = document.getElementById("minIF");
+    const maxIF = document.getElementById("maxIF");
+    const clearBtn = document.getElementById("clearBtn");
+    const table = document.getElementById("jifTable");
+    const tbody = table.tBodies[0];
+
+    function parseNum(s) {{
+      if (!s) return NaN;
+      s = s.replace(/,/g, "").trim();
+      if (s.startsWith("<")) s = s.slice(1).trim();
+      const n = Number(s);
+      return Number.isFinite(n) ? n : NaN;
+    }}
+
+    function applyFilters() {{
+      const query = (q.value || "").toLowerCase().trim();
+      const min = minIF.value === "" ? -Infinity : Number(minIF.value);
+      const max = maxIF.value === "" ? Infinity : Number(maxIF.value);
+
+      for (const row of tbody.rows) {{
+        const name = (row.cells[0].innerText || "").toLowerCase();
+        const ifText = row.cells[1].innerText || "";
+        const ifVal = parseNum(ifText);
+
+        const nameOK = query === "" || name.includes(query);
+
+        // Require a numeric IF to pass IF filters.
+        // If you want rows with blank IF to show when no range is set,
+        // tell me and I’ll tweak this logic.
+        const ifOK = Number.isFinite(ifVal) && ifVal >= min && ifVal <= max;
+
+        row.style.display = (nameOK && ifOK) ? "" : "none";
+      }}
+    }}
+
+    q.addEventListener("input", applyFilters);
+    minIF.addEventListener("input", applyFilters);
+    maxIF.addEventListener("input", applyFilters);
+
+    clearBtn.addEventListener("click", function () {{
+      q.value = "";
+      minIF.value = "";
+      maxIF.value = "";
+      applyFilters();
+    }});
+
+    applyFilters();
+  }})();
+  </script>
 </body>
 </html>
 """
+
 
 
 def main():
