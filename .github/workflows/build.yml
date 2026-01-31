@@ -8,7 +8,7 @@ on:
       - ".github/workflows/**"
       - "requirements.txt"
   schedule:
-    - cron: "0 9 1 3 *" 
+    - cron: "0 9 1 * *" 
   workflow_dispatch:
 
 permissions:
