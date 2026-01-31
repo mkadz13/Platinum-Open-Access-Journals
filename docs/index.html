@@ -49,7 +49,6 @@
     <input id="minIF" type="number" step="0.001" placeholder="Min IF" />
     <input id="maxIF" type="number" step="0.001" placeholder="Max IF" />
     <button id="clearBtn" type="button">Clear</button>
-    <div class="hint">Tip: filtering is debounced for speed on large tables.</div>
   </div>
 
   <table id="jifTable" border="1" class="dataframe">
@@ -12704,7 +12703,6 @@
       const ifText = (row.cells[1].innerText || "").replace(/,/g, "").trim();
       let ifVal = Number(ifText);
       if (!Number.isFinite(ifVal)) {
-        // handle "<0.1" just in case, though you format to 3dp
         if (ifText.startsWith("<")) {
           const t = Number(ifText.slice(1).trim());
           ifVal = Number.isFinite(t) ? t : NaN;
@@ -12720,7 +12718,6 @@
       const min = minIF.value === "" ? -Infinity : Number(minIF.value);
       const max = maxIF.value === "" ? Infinity : Number(maxIF.value);
 
-      // One pass over cached array (no DOM reads)
       for (const item of cached) {
         const nameOK = query === "" || item.name.includes(query);
         const ifOK = Number.isFinite(item.ifVal) && item.ifVal >= min && item.ifVal <= max;
@@ -12745,7 +12742,6 @@
       applyFiltersNow();
     });
 
-    // initial
     applyFiltersNow();
   })();
   </script>
