@@ -271,11 +271,9 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     df["Links"] = df.apply(link_cell, axis=1)
     df = df[["Journal", "Impact Factor", "Links"]]
 
-    # Format Impact Factor consistently for display
     df["Impact Factor"] = df["Impact Factor"].map(lambda x: f"{x:.3f}" if pd.notna(x) else "")
 
     table_html = df.to_html(index=False, escape=False)
-    # Add an id so JS can find the table
     table_html = table_html.replace(
         '<table border="1" class="dataframe">',
         '<table id="jifTable" border="1" class="dataframe">'
@@ -332,7 +330,7 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     <input id="minIF" type="number" step="0.001" placeholder="Min IF" />
     <input id="maxIF" type="number" step="0.001" placeholder="Max IF" />
     <button id="clearBtn" type="button">Clear</button>
-    <div class="hint">Tip: use Min/Max to filter by impact factor range.</div>
+    <div class="hint">Tip: filtering is debounced for speed on large tables.</div>
   </div>
 
   {table_html}
@@ -346,52 +344,61 @@ def to_html(df: pd.DataFrame, year_label: str) -> str:
     const table = document.getElementById("jifTable");
     const tbody = table.tBodies[0];
 
-    function parseNum(s) {{
-      if (!s) return NaN;
-      s = s.replace(/,/g, "").trim();
-      if (s.startsWith("<")) s = s.slice(1).trim();
-      const n = Number(s);
-      return Number.isFinite(n) ? n : NaN;
-    }}
+    const rows = Array.from(tbody.rows);
+    const cached = rows.map(row => {{
+      const name = (row.cells[0].innerText || "").toLowerCase();
+      const ifText = (row.cells[1].innerText || "").replace(/,/g, "").trim();
+      let ifVal = Number(ifText);
+      if (!Number.isFinite(ifVal)) {{
+        // handle "<0.1" just in case, though you format to 3dp
+        if (ifText.startsWith("<")) {{
+          const t = Number(ifText.slice(1).trim());
+          ifVal = Number.isFinite(t) ? t : NaN;
+        }} else {{
+          ifVal = NaN;
+        }}
+      }}
+      return {{ row, name, ifVal }};
+    }});
 
-    function applyFilters() {{
+    function applyFiltersNow() {{
       const query = (q.value || "").toLowerCase().trim();
       const min = minIF.value === "" ? -Infinity : Number(minIF.value);
       const max = maxIF.value === "" ? Infinity : Number(maxIF.value);
 
-      for (const row of tbody.rows) {{
-        const name = (row.cells[0].innerText || "").toLowerCase();
-        const ifText = row.cells[1].innerText || "";
-        const ifVal = parseNum(ifText);
-
-        const nameOK = query === "" || name.includes(query);
-
-        // Require a numeric IF to pass IF filters.
-        // If you want rows with blank IF to show when no range is set,
-        // tell me and I’ll tweak this logic.
-        const ifOK = Number.isFinite(ifVal) && ifVal >= min && ifVal <= max;
-
-        row.style.display = (nameOK && ifOK) ? "" : "none";
+      // One pass over cached array (no DOM reads)
+      for (const item of cached) {{
+        const nameOK = query === "" || item.name.includes(query);
+        const ifOK = Number.isFinite(item.ifVal) && item.ifVal >= min && item.ifVal <= max;
+        item.row.style.display = (nameOK && ifOK) ? "" : "none";
       }}
     }}
 
-    q.addEventListener("input", applyFilters);
-    minIF.addEventListener("input", applyFilters);
-    maxIF.addEventListener("input", applyFilters);
+    let t = null;
+    function scheduleApply() {{
+      if (t) clearTimeout(t);
+      t = setTimeout(applyFiltersNow, 180); // tweak 150–250ms
+    }}
+
+    q.addEventListener("input", scheduleApply);
+    minIF.addEventListener("input", scheduleApply);
+    maxIF.addEventListener("input", scheduleApply);
 
     clearBtn.addEventListener("click", function () {{
       q.value = "";
       minIF.value = "";
       maxIF.value = "";
-      applyFilters();
+      applyFiltersNow();
     }});
 
-    applyFilters();
+    // initial
+    applyFiltersNow();
   }})();
   </script>
 </body>
 </html>
 """
+
 
 
 
